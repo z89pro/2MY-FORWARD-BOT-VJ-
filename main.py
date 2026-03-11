@@ -61,11 +61,75 @@ if __name__ == "__main__":
                 yield message
                 current += 1
                
+    from plugins.unequeify import unpack_new_file_id
+    from pyrogram.enums import MessagesFilter
+    from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
+    from database import db
+
+    async def log_channel_cleaner(bot_client):
+        while True:
+            await asyncio.sleep(21600)  # Runs every 6 hour
+            if Config.LOG_CHANNEL != 0:
+                try:
+                    MESSAGES = []
+                    DUPLICATE = []
+                    
+                    async for message in bot_client.search_messages(chat_id=Config.LOG_CHANNEL, filter=MessagesFilter.DOCUMENT):
+                        file = message.document
+                        if not file: continue
+                        
+                        try:
+                            file_id = unpack_new_file_id(file.file_id) 
+                            
+                            if file_id in MESSAGES:
+                                DUPLICATE.append(message.id)
+                            else:
+                                MESSAGES.append(file_id)
+                                
+                            if len(DUPLICATE) >= 100:
+                                await bot_client.delete_messages(Config.LOG_CHANNEL, DUPLICATE)
+                                DUPLICATE = []
+                        except Exception as file_e:
+                            pass
+                            
+                    if DUPLICATE:
+                        await bot_client.delete_messages(Config.LOG_CHANNEL, DUPLICATE)
+                except Exception as e:
+                    pass
+
+    async def send_restart_notification(bot_client):
+        users = await db.get_all_users()
+        msg_text = "✅ **Bot restarted successfully!**\n\nAll systems are fully operational."
+        async for user in users:
+            try:
+                await bot_client.send_message(chat_id=user['id'], text=msg_text)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                try:
+                    await bot_client.send_message(chat_id=user['id'], text=msg_text)
+                except:
+                    pass
+            except InputUserDeactivated:
+                await db.delete_user(int(user['id']))
+            except UserIsBlocked:
+                pass
+            except PeerIdInvalid:
+                await db.delete_user(int(user['id']))
+            except Exception:
+                pass
+
     async def main():
         await VJBot.start()
         bot_info  = await VJBot.get_me()
         await restart_forwards(VJBot)
         print("Bot Started.")
+        
+        # Start Log Channel Cleaner Task
+        asyncio.create_task(log_channel_cleaner(VJBot))
+        
+        # Start Restart Notification Task
+        asyncio.create_task(send_restart_notification(VJBot))
+        
         await idle()
 
     asyncio.get_event_loop().run_until_complete(main())

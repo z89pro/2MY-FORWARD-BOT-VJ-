@@ -232,7 +232,7 @@ async def get_client(bot_token, is_bot=True):
   if is_bot:
     return Client("BOT", Config.API_ID, Config.API_HASH, bot_token=bot_token, in_memory=True)
   else:
-    return Client("USERBOT", Config.API_ID, Config.API_HASH, session_string=bot_token)
+    return Client("USERBOT", Config.API_ID, Config.API_HASH, session_string=bot_token, in_memory=True)
 
 # Don't Remove Credit Tg - @VJ_Botz
 # Subscribe YouTube Channel For Amazing Bot https://youtube.com/@Tech_VJ

@@ -91,8 +91,15 @@ async def unequify(client, message):
       if chat_id.isnumeric():
          chat_id  = int(("-100" + chat_id))
    elif target.forward_origin:
-        last_msg_id = target.forward_origin.message_id
-        chat_id = target.forward_origin.chat.id if hasattr(target.forward_origin, 'chat') else target.forward_origin.sender_user.id
+      if hasattr(target.forward_origin, "chat"):
+         chat_id = target.forward_origin.chat.id
+      elif hasattr(target.forward_origin, "sender_user"):
+         chat_id = target.forward_origin.sender_user.id
+      elif hasattr(target.forward_origin, "sender_chat"):
+         chat_id = target.forward_origin.sender_chat.id
+      else:
+         return await message.reply_text("**Could not determine chat_id from forward origin.**")
+      last_msg_id = getattr(target.forward_origin, "message_id", None)
    else:
         return await message.reply_text("**invalid !**")
    confirm = await client.ask(user_id, text="**send /yes to start the process and /no to cancel this process**")

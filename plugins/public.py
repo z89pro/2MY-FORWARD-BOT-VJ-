@@ -59,9 +59,9 @@ async def run(bot, message):
         last_msg_id = int(match.group(5))
         if chat_id.isnumeric():
             chat_id  = int(("-100" + chat_id))
-    elif fromid.forward_from_chat.type in [enums.ChatType.CHANNEL, 'supergroup']:
-        last_msg_id = fromid.forward_from_message_id
-        chat_id = fromid.forward_from_chat.username or fromid.forward_from_chat.id
+    elif fromid.forward_origin:
+        last_msg_id = fromid.forward_origin.message_id
+        chat_id = fromid.forward_origin.chat.id if hasattr(fromid.forward_origin, 'chat') else fromid.forward_origin.sender_user.id
         if last_msg_id == None:
            return await message.reply_text("**This may be a forwarded message from a group and sended by anonymous admin. instead of this please send last message link from group**")
     else:

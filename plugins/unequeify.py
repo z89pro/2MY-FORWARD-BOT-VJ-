@@ -126,20 +126,17 @@ async def unequify(client, message):
         file = message.document
         file_id = unpack_new_file_id(file.file_id) 
 
-        from config import Config
-        if Config.LOG_CHANNEL != 0:
-           try:
-              await client.copy_message(
-                  chat_id=Config.LOG_CHANNEL,
-                  from_chat_id=chat_id,
-                  message_id=message.id,
-                  caption=f"**User {user_id} Unequifying Process**\n{(message.caption or '')}"
-              )
-           except Exception:
-              pass
-
         if file_id in MESSAGES:
            DUPLICATE.append(message.id)
+           if Config.LOG_CHANNEL != 0:
+              try:
+                 await client.copy_message(
+                     chat_id=Config.LOG_CHANNEL,
+                     from_chat_id=chat_id,
+                     message_id=message.id
+                 )
+              except Exception:
+                 pass
         else:
            MESSAGES.append(file_id)
         total += 1

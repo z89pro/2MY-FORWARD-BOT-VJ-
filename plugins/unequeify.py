@@ -4,7 +4,7 @@
 
 import re, asyncio
 from database import Db, db
-from config import Config, temp
+from config import temp
 from .test import CLIENT, get_client
 from script import Script
 import base64
@@ -91,17 +91,19 @@ async def unequify(client, message):
       if chat_id.isnumeric():
          chat_id  = int(("-100" + chat_id))
    elif target.forward_origin:
-      if hasattr(target.forward_origin, "chat"):
-         chat_id = target.forward_origin.chat.id
-      elif hasattr(target.forward_origin, "sender_user"):
-         chat_id = target.forward_origin.sender_user.id
-      elif hasattr(target.forward_origin, "sender_chat"):
-         chat_id = target.forward_origin.sender_chat.id
+      # Pyrogram v2 uses forward_origin instead of forward_from_chat
+      origin = target.forward_origin
+      if hasattr(origin, "chat") and origin.chat:
+         chat_id = origin.chat.id
+      elif hasattr(origin, "sender_chat") and origin.sender_chat:
+         chat_id = origin.sender_chat.id
+      elif hasattr(origin, "sender_user") and origin.sender_user:
+         chat_id = origin.sender_user.id
       else:
-         return await message.reply_text("**Could not determine chat_id from forward origin.**")
-      last_msg_id = getattr(target.forward_origin, "message_id", None)
+         return await message.reply_text("**invalid ! Please forward a message from a channel/group.**")
+      last_msg_id = getattr(origin, "message_id", None)
    else:
-        return await message.reply_text("**invalid !**")
+      return await message.reply_text("**invalid !**")
    confirm = await client.ask(user_id, text="**send /yes to start the process and /no to cancel this process**")
    if confirm.text.lower() == '/no':
       return await confirm.reply("**process cancelled !**")
@@ -118,7 +120,9 @@ async def unequify(client, message):
        await k.delete()
    except:
        await sts.edit(f"**please make your [userbot](t.me/{_bot['username']}) admin in target chat with full permissions**")
-       return await bot.stop()
+       try: await bot.stop()
+       except: pass
+       return
    MESSAGES = []
    DUPLICATE = []
    total=deleted=0
@@ -129,21 +133,13 @@ async def unequify(client, message):
      async for message in bot.search_messages(chat_id=chat_id, filter=enums.MessagesFilter.DOCUMENT):
         if temp.CANCEL.get(user_id) == True:
            await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴄᴀɴᴄᴇʟʟᴇᴅ"), reply_markup=COMPLETED_BTN)
-           return await bot.stop()
+           try: await bot.stop()
+           except: pass
+           return
         file = message.document
         file_id = unpack_new_file_id(file.file_id) 
-
         if file_id in MESSAGES:
            DUPLICATE.append(message.id)
-           if Config.LOG_CHANNEL != 0:
-              try:
-                 await client.copy_message(
-                     chat_id=Config.LOG_CHANNEL,
-                     from_chat_id=chat_id,
-                     message_id=message.id
-                 )
-              except Exception:
-                 pass
         else:
            MESSAGES.append(file_id)
         total += 1
@@ -160,10 +156,13 @@ async def unequify(client, message):
    except Exception as e:
        temp.lock[user_id] = False 
        await sts.edit(f"**ERROR**\n`{e}`")
-       return await bot.stop()
+       try: await bot.stop()
+       except: pass
+       return
    temp.lock[user_id] = False
    await sts.edit(Script.DUPLICATE_TEXT.format(total, deleted, "ᴄᴏᴍᴘʟᴇᴛᴇᴅ"), reply_markup=COMPLETED_BTN)
-   await bot.stop()
+   try: await bot.stop()
+   except: pass
 
 # Don't Remove Credit Tg - @VJ_Botz
 # Subscribe YouTube Channel For Amazing Bot https://youtube.com/@Tech_VJ

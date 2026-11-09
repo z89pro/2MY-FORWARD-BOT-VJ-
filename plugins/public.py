@@ -223,11 +223,27 @@ async def run(bot, message):
         [KeyboardButton("👥 ᴘɪᴄᴋ ᴛᴀʀɢᴇᴛ ɢʀᴏᴜᴘ", request_chat=RequestPeerTypeChat(button_id=102))]
     ]
     for idx, channel in enumerate(channels, start=1):
-        label = f"{idx}. {channel['title']}"
+        c_title = (channel.get('title') or '').strip()
+        c_id = str(channel.get('chat_id', ''))
+        label = f"{idx}. {c_title}"
         buttons.append([KeyboardButton(label)])
+
         target_map[label] = channel
+        target_map[label.lower()] = channel
         target_map[str(idx)] = channel
-        target_map[channel['title'].strip().lower()] = channel
+        target_map[c_title] = channel
+        target_map[c_title.lower()] = channel
+        target_map[c_id] = channel
+        try:
+            from font_styler import style_button
+            styled_l = style_button(label)
+            target_map[styled_l] = channel
+            target_map[styled_l.lower()] = channel
+            styled_t = style_button(c_title)
+            target_map[styled_t] = channel
+            target_map[styled_t.lower()] = channel
+        except Exception:
+            pass
     buttons.append([KeyboardButton(ADD_CHANNEL_BTN)])
     buttons.append([KeyboardButton("cancel")])
     keyboard = ReplyKeyboardMarkup(buttons, one_time_keyboard=True, resize_keyboard=True)

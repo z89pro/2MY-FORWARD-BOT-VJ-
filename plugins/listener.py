@@ -5,6 +5,7 @@ Attaches .listen() and .ask() to Client and Chat, and sanitizes quote/disable_we
 import asyncio
 import logging
 from pyrogram import Client, StopPropagation
+from pyrogram.handlers import MessageHandler
 from pyrogram.types import Message, Chat, LinkPreviewOptions
 import pyrogram.errors
 
@@ -20,45 +21,52 @@ if not hasattr(pyrogram.errors, "ListenerTimeout"):
         pass
     pyrogram.errors.ListenerTimeout = ListenerTimeout
 
-# 1. Hook Message._parse to intercept messages for waiting listeners
-_orig_parse = getattr(Message, "_parse", None)
 
-@staticmethod
-async def _custom_listener_parse(client, message, users, chats, *args, **kwargs):
-    msg = await _orig_parse(client, message, users, chats, *args, **kwargs)
-    if not msg:
-        return msg
+# 1. Incoming Message Dispatcher for interactive listeners (runs at highest priority group -100)
+async def _listener_dispatcher(client, message):
+    # Ignore outgoing messages sent by the bot or account itself
+    if getattr(message, "outgoing", False):
+        return
+    from_user = getattr(message, "from_user", None)
+    if from_user and getattr(from_user, "is_self", False):
+        return
+    if hasattr(client, "me") and client.me and from_user and from_user.id == client.me.id:
+        return
 
-    chat_id = getattr(getattr(msg, "chat", None), "id", None)
-    user_id = getattr(getattr(msg, "from_user", None), "id", None)
+    chat_id = getattr(getattr(message, "chat", None), "id", None)
+    user_id = getattr(from_user, "id", None) if from_user else None
+    if not chat_id:
+        return
 
+    # Check matching listener keys: (chat_id, user_id) or (chat_id, None)
     for key in ((chat_id, user_id), (chat_id, None)):
         if key in _ACTIVE_FUTURES:
             fut, flt = _ACTIVE_FUTURES[key]
             if flt is not None:
                 try:
-                    match = flt(client, msg)
+                    match = flt(client, message)
                     if asyncio.iscoroutine(match):
                         match = await match
                 except Exception:
                     match = False
                 if not match:
-                    continue  # Filter did not match, keep listening
+                    continue
 
             _ACTIVE_FUTURES.pop(key, None)
             if not fut.done():
-                fut.set_result(msg)
+                fut.set_result(message)
             raise StopPropagation
 
-    return msg
 
-if _orig_parse and not getattr(_orig_parse, "_is_custom_listener", False):
-    _custom_listener_parse._is_custom_listener = True
-    Message._parse = _custom_listener_parse
+def _ensure_listener_registered(client):
+    if not getattr(client, "_listener_handler_registered", False):
+        client.add_handler(MessageHandler(_listener_dispatcher), group=-100)
+        client._listener_handler_registered = True
 
 
 # 2. Attach .listen() to Client
 async def client_listen(self, chat_id, filters=None, timeout=None, user_id=None):
+    _ensure_listener_registered(self)
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     key = (chat_id, user_id) if user_id else (chat_id, None)
@@ -70,23 +78,64 @@ async def client_listen(self, chat_id, filters=None, timeout=None, user_id=None)
     except asyncio.TimeoutError:
         _ACTIVE_FUTURES.pop(key, None)
         raise pyrogram.errors.ListenerTimeout(f"Listen operation timed out after {timeout}s.")
+    except Exception:
+        _ACTIVE_FUTURES.pop(key, None)
+        raise
 
 Client.listen = client_listen
 
 
 # 3. Attach .ask() to Client
-async def client_ask(self, chat_id, text=None, filters=None, timeout=None, user_id=None, *args, **kwargs):
+async def client_ask(self, *args, **kwargs):
     kwargs.pop("quote", None)
     if kwargs.pop("disable_web_page_preview", None):
         kwargs["link_preview_options"] = LinkPreviewOptions(is_disabled=True)
 
-    if text is not None:
-        await self.send_message(chat_id, text, *args, **kwargs)
-    elif "text" in kwargs:
-        t = kwargs.pop("text")
-        await self.send_message(chat_id, t, *args, **kwargs)
+    chat_id = None
+    if args:
+        chat_id = args[0]
+        args = args[1:]
+    elif "chat_id" in kwargs:
+        chat_id = kwargs.pop("chat_id")
 
-    return await self.listen(chat_id, filters=filters, timeout=timeout, user_id=user_id)
+    text = None
+    if args:
+        text = args[0]
+        args = args[1:]
+    elif "text" in kwargs:
+        text = kwargs.pop("text")
+
+    filters = kwargs.pop("filters", None)
+    timeout = kwargs.pop("timeout", None)
+    user_id = kwargs.pop("user_id", None)
+
+    _ensure_listener_registered(self)
+
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    key = (chat_id, user_id) if user_id else (chat_id, None)
+    _ACTIVE_FUTURES[key] = (fut, filters)
+
+    try:
+        if text is not None:
+            await self.send_message(chat_id, text, *args, **kwargs)
+        elif "text" in kwargs:
+            t = kwargs.pop("text")
+            await self.send_message(chat_id, t, *args, **kwargs)
+    except Exception:
+        _ACTIVE_FUTURES.pop(key, None)
+        raise
+
+    try:
+        if timeout:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        return await fut
+    except asyncio.TimeoutError:
+        _ACTIVE_FUTURES.pop(key, None)
+        raise pyrogram.errors.ListenerTimeout(f"Listen operation timed out after {timeout}s.")
+    except Exception:
+        _ACTIVE_FUTURES.pop(key, None)
+        raise
 
 Client.ask = client_ask
 
